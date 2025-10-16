@@ -3,8 +3,24 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "dev": "set PORT=3012&& set NEXT_PUBLIC_API_BASE_URL=http://192.168.15.26:8080&& next dev -p 3012",
+    "dev": "set PORT=3013&& next dev -p 3013",
     "build": "next build",
-    "start": "next start -p 3012"
+    "start": "next start -p 3013"
+  },
+  "dependencies": {
+    "@tanstack/react-query": "5.59.3",
+    "framer-motion": "11.11.17",
+    "next": "14.2.15",
+    "react": "18.3.1",
+    "react-dom": "18.3.1",
+    "react-error-boundary": "4.0.13",
+    "react-hook-form": "7.53.0",
+    "zustand": "4.5.4"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4.1.14",
+    "@types/node": "24.7.2",
+    "@types/react": "19.2.2",
+    "typescript": "5.9.3"
   }
 }

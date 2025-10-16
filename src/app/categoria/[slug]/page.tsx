@@ -7,9 +7,15 @@ import { Suspense } from "react";
 
 export const revalidate = 300;
 
-export default async function Home() {
-  const [initial, initialCats] = await Promise.all([
-    fetchProducts({ page: 1, page_size: 24, order: "name_asc" }),
+interface PageProps {
+  params: Promise<{ slug: string }>;
+}
+
+export default async function CategoriaPage({ params }: PageProps) {
+  const { slug } = await params;
+  const category = decodeURIComponent(slug || "");
+  const [initial, allCats] = await Promise.all([
+    fetchProducts({ page: 1, page_size: 24, order: "name_asc", category }),
     fetchCategories(),
   ]);
 
@@ -64,14 +70,15 @@ export default async function Home() {
             role="status"
             aria-live="polite"
           >
-            Carregando catálogo...
+            Carregando categoria...
           </div>
         }
       >
         <CatalogClient
           initialItems={initial.items}
           initialTotal={initial.meta.total}
-          initialCategories={initialCats}
+          initialCategories={allCats}
+          initialCategory={category}
         />
       </Suspense>
     </>

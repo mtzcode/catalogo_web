@@ -11,11 +11,17 @@ interface CatalogClientProps {
   initialItems: Produto[];
   initialTotal: number;
   initialCategories: string[];
+  initialCategory?: string;
 }
 
-export default function CatalogClient({ initialItems, initialTotal, initialCategories }: CatalogClientProps) {
+export default function CatalogClient({
+  initialItems,
+  initialTotal,
+  initialCategories,
+  initialCategory,
+}: CatalogClientProps) {
   const [search, setSearch] = useState("");
-  const [category, setCategory] = useState<string | undefined>(undefined);
+  const [category, setCategory] = useState<string | undefined>(initialCategory);
   const searchParams = useSearchParams();
   const chipsRef = useRef<HTMLDivElement | null>(null);
 
@@ -37,16 +43,18 @@ export default function CatalogClient({ initialItems, initialTotal, initialCateg
   //   }
   // }, [categories]);
 
-  // Ler categoria da URL (?category=...)
+  // Ler categoria da URL (?category=...) ou da rota limpa (/categoria/slug)
   useEffect(() => {
     const catParam = searchParams.get("category");
-    setCategory(catParam || undefined);
-  }, [searchParams]);
+    setCategory(catParam || initialCategory || undefined);
+  }, [searchParams, initialCategory]);
 
   useEffect(() => {
     const container = chipsRef.current;
     if (!container) return;
-    const activeId = category ? `cat-${encodeURIComponent(category)}` : "cat-__all__";
+    const activeId = category
+      ? `cat-${encodeURIComponent(category)}`
+      : "cat-__all__";
     const el = document.getElementById(activeId);
     if (el) {
       const target = el as HTMLElement;
@@ -61,7 +69,14 @@ export default function CatalogClient({ initialItems, initialTotal, initialCateg
   useEffect(() => {
     const controller = new AbortController();
     startTransition(() => {
-      fetchProducts({ search: search || undefined, category: category || undefined, page: 1, page_size: 24, order: "name_asc", signal: controller.signal })
+      fetchProducts({
+        search: search || undefined,
+        category: category || undefined,
+        page: 1,
+        page_size: 24,
+        order: "name_asc",
+        signal: controller.signal,
+      })
         .then((data) => {
           setItems(data.items);
           setTotal(data.meta.total);
@@ -70,7 +85,9 @@ export default function CatalogClient({ initialItems, initialTotal, initialCateg
         })
         .catch((e: unknown) => {
           if (e instanceof Error && e.name === "AbortError") return;
-          setError(e instanceof Error ? e.message : "Erro ao carregar produtos");
+          setError(
+            e instanceof Error ? e.message : "Erro ao carregar produtos"
+          );
         });
     });
     return () => controller.abort();
@@ -93,11 +110,13 @@ export default function CatalogClient({ initialItems, initialTotal, initialCateg
       setHasMore(Boolean(data.meta.hasMore));
       setPage(nextPage);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Erro ao carregar mais produtos");
+      setError(
+        e instanceof Error ? e.message : "Erro ao carregar mais produtos"
+      );
     } finally {
       setLoadingMore(false);
     }
-  // deps for callback
+    // deps for callback
   }, [loadingMore, isPending, hasMore, page, search, category]);
 
   // IntersectionObserver para rolagem infinita
@@ -127,22 +146,38 @@ export default function CatalogClient({ initialItems, initialTotal, initialCateg
           <h1 className="text-2xl font-bold mb-2 text-center">Produtos</h1>
           <div className="flex items-center shadow-sm hover:shadow-md transition-all duration-300">
             <div className="h-10 w-10 flex items-center justify-center rounded-l-md bg-primary">
-              <svg viewBox="0 0 24 24" className="h-5 w-5 text-white fill-none" stroke="currentColor" strokeWidth="2.5" aria-hidden="true">
+              <svg
+                viewBox="0 0 24 24"
+                className="h-5 w-5 text-white fill-none"
+                stroke="currentColor"
+                strokeWidth="2.5"
+                aria-hidden="true"
+              >
                 <circle cx="11" cy="11" r="7"></circle>
                 <path d="M21 21l-4.3-4.3"></path>
               </svg>
             </div>
             <input
               className="h-10 flex-1 rounded-r-md border border-gray-300 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-gray-300 px-3 text-sm transition-all duration-300"
-               placeholder="Buscar por nome ou código de barras..."
-               value={search}
-               onChange={(e) => setSearch(e.target.value)}
-               aria-label="Buscar produtos por nome ou código de barras"
-             />
+              placeholder="Buscar por nome ou código de barras..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              aria-label="Buscar produtos por nome ou código de barras"
+            />
           </div>
           {isPending && (
-            <div className="text-xs text-gray-500 flex items-center gap-2" role="status" aria-live="polite">
-              <svg viewBox="0 0 24 24" className="h-4 w-4 animate-spin" fill="none" stroke="currentColor" strokeWidth="2">
+            <div
+              className="text-xs text-gray-500 flex items-center gap-2"
+              role="status"
+              aria-live="polite"
+            >
+              <svg
+                viewBox="0 0 24 24"
+                className="h-4 w-4 animate-spin"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+              >
                 <circle cx="12" cy="12" r="10" />
                 <path d="M12 2v4M12 18v4M2 12h4M18 12h4" />
               </svg>
@@ -154,11 +189,18 @@ export default function CatalogClient({ initialItems, initialTotal, initialCateg
 
       {/* Categorias visíveis na página principal */}
       <div className="-mt-2">
-        <div ref={chipsRef} className="flex items-center gap-2 overflow-x-auto no-scrollbar py-2 px-1">
+        <div
+          ref={chipsRef}
+          className="flex items-center gap-2 overflow-x-auto no-scrollbar py-2 px-1"
+        >
           <Link
             id="cat-__all__"
             href="/"
-            className={`whitespace-nowrap text-xs rounded-full border px-3 py-1.5 transition ${!category ? "bg-primary text-white border-primary" : "bg-white text-gray-700 hover:bg-gray-100 border-gray-300"}`}
+            className={`whitespace-nowrap text-xs rounded-full border px-3 py-1.5 transition ${
+              !category
+                ? "bg-primary text-white border-primary"
+                : "bg-white text-gray-700 hover:bg-gray-100 border-gray-300"
+            }`}
             title="Todas as categorias"
           >
             Todas
@@ -166,9 +208,13 @@ export default function CatalogClient({ initialItems, initialTotal, initialCateg
           {initialCategories?.map((c) => (
             <Link
               id={`cat-${encodeURIComponent(c)}`}
-              href={`/?category=${encodeURIComponent(c)}`}
+              href={`/categoria/${encodeURIComponent(c)}`}
               key={c}
-              className={`whitespace-nowrap text-xs rounded-full border px-3 py-1.5 transition ${category === c ? "bg-primary text-white border-primary" : "bg-white text-gray-700 hover:bg-gray-100 border-gray-300"}`}
+              className={`whitespace-nowrap text-xs rounded-full border px-3 py-1.5 transition ${
+                category === c
+                  ? "bg-primary text-white border-primary"
+                  : "bg-white text-gray-700 hover:bg-gray-100 border-gray-300"
+              }`}
               title={c}
             >
               {c}
@@ -178,18 +224,32 @@ export default function CatalogClient({ initialItems, initialTotal, initialCateg
       </div>
 
       {error && (
-        <div className="p-3 rounded-md bg-[rgba(255,0,0,.05)] border border-red-200 text-red-700 text-sm">{error}</div>
+        <div className="p-3 rounded-md bg-[rgba(255,0,0,.05)] border border-red-200 text-red-700 text-sm">
+          {error}
+        </div>
       )}
 
       <SimpleProductGrid items={items} />
 
       {total > 0 && (
-        <div className="text-xs text-gray-500 text-center">{items.length} de {total} produtos</div>
+        <div className="text-xs text-gray-500 text-center">
+          {items.length} de {total} produtos
+        </div>
       )}
       <div ref={sentinelRef} className="h-8 w-full" aria-hidden="true" />
       {loadingMore && (
-        <div className="text-xs text-gray-500 flex items-center justify-center gap-2 py-2" role="status" aria-live="polite">
-          <svg viewBox="0 0 24 24" className="h-4 w-4 animate-spin" fill="none" stroke="currentColor" strokeWidth="2">
+        <div
+          className="text-xs text-gray-500 flex items-center justify-center gap-2 py-2"
+          role="status"
+          aria-live="polite"
+        >
+          <svg
+            viewBox="0 0 24 24"
+            className="h-4 w-4 animate-spin"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+          >
             <circle cx="12" cy="12" r="10" />
             <path d="M12 2v4M12 18v4M2 12h4M18 12h4" />
           </svg>
@@ -197,8 +257,13 @@ export default function CatalogClient({ initialItems, initialTotal, initialCateg
         </div>
       )}
       <style jsx>{`
-        .no-scrollbar { scrollbar-width: none; -ms-overflow-style: none; }
-        .no-scrollbar::-webkit-scrollbar { display: none; }
+        .no-scrollbar {
+          scrollbar-width: none;
+          -ms-overflow-style: none;
+        }
+        .no-scrollbar::-webkit-scrollbar {
+          display: none;
+        }
       `}</style>
     </div>
   );

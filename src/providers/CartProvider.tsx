@@ -1,8 +1,9 @@
 'use client';
 
-import React, { createContext, useContext, useEffect, useMemo, useState } from 'react';
+import React from 'react';
 import type { Produto } from '@/lib/types';
-import { computeLineTotal } from "@/lib/weightUtil";
+import { computeLineTotal } from '@/lib/weightUtil';
+import { useCartStore } from './cartStore';
 
 export type CartItem = {
   product: Produto;
@@ -20,62 +21,21 @@ type CartContextValue = {
   subtotal: number;
 };
 
-const CartContext = createContext<CartContextValue | undefined>(undefined);
-const STORAGE_KEY = 'catalogo_web_cart';
-
+// Mantemos o CartProvider para compatibilidade com a árvore de componentes.
 export function CartProvider({ children }: { children: React.ReactNode }) {
-  const [items, setItems] = useState<CartItem[]>([]);
+  return <>{children}</>;
+}
 
-  // carregar do localStorage
-  useEffect(() => {
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      if (raw) {
-        const parsed = JSON.parse(raw) as CartItem[];
-        if (Array.isArray(parsed)) setItems(parsed);
-      }
-    } catch {}
-  }, []);
+// Hook compatível com a API anterior, agora baseado em Zustand.
+export function useCart(): CartContextValue {
+  const items = useCartStore((s) => s.items);
+  const add = useCartStore((s) => s.add);
+  const remove = useCartStore((s) => s.remove);
+  const clear = useCartStore((s) => s.clear);
+  const inc = useCartStore((s) => s.inc);
+  const dec = useCartStore((s) => s.dec);
 
-  // persistir no localStorage
-  useEffect(() => {
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(items));
-    } catch {}
-  }, [items]);
-
-  const add = (p: Produto, qty: number = 1) => {
-    setItems((prev) => {
-      const idx = prev.findIndex((it) => String(it.product.id) === String(p.id));
-      if (idx >= 0) {
-        const clone = [...prev];
-        clone[idx] = { ...clone[idx], qty: clone[idx].qty + qty };
-        return clone;
-      }
-      return [...prev, { product: p, qty }];
-    });
-  };
-
-  const remove = (id: Produto['id']) => {
-    setItems((prev) => prev.filter((it) => String(it.product.id) !== String(id)));
-  };
-
-  const clear = () => setItems([]);
-
-  const inc = (id: Produto['id']) => {
-    setItems((prev) => prev.map((it) => (String(it.product.id) === String(id) ? { ...it, qty: it.qty + 1 } : it)));
-  };
-
-  const dec = (id: Produto['id']) => {
-    setItems((prev) => prev.flatMap((it) => {
-      if (String(it.product.id) !== String(id)) return [it];
-      const nextQty = it.qty - 1;
-      if (nextQty <= 0) return [];
-      return [{ ...it, qty: nextQty }];
-    }));
-  };
-
-  const subtotal = useMemo(() => {
+  const subtotal = React.useMemo(() => {
     return items.reduce((sum, it) => {
       const isPromo = !!it.product.promocaoAtiva && !!it.product.precoPromocional;
       const basePrice = isPromo ? (it.product.precoPromocional as number) : Number(it.product.preco || 0);
@@ -84,9 +44,9 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     }, 0);
   }, [items]);
 
-  const totalItems = useMemo(() => items.reduce((s, it) => s + it.qty, 0), [items]);
+  const totalItems = React.useMemo(() => items.reduce((s, it) => s + it.qty, 0), [items]);
 
-  const value: CartContextValue = {
+  return {
     items,
     add,
     remove,
@@ -96,12 +56,4 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     totalItems,
     subtotal,
   };
-
-  return <CartContext.Provider value={value}>{children}</CartContext.Provider>;
-}
-
-export function useCart() {
-  const ctx = useContext(CartContext);
-  if (!ctx) throw new Error('useCart must be used within CartProvider');
-  return ctx;
 }

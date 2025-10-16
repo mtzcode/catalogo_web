@@ -1,10 +1,31 @@
 'use client'
 
-import React, { useState } from 'react'
+import React, { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useCart } from '@/providers/CartProvider'
 import type { CartItem } from '@/providers/CartProvider'
 import { computeLineTotal, getUnitPricePer100g, formatQtyGrams, isWeightProduct } from "@/lib/weightUtil";
+import { m, AnimatePresence } from 'framer-motion'
+import { useForm } from 'react-hook-form'
+
+type PickupFormValues = {
+  nome: string;
+  telefone: string;
+  pagamento: 'Dinheiro' | 'Cartao' | 'Pix';
+}
+
+type DeliveryFormValues = {
+  nome: string;
+  telefone: string;
+  cep: string;
+  endereco: string;
+  numero: string;
+  bairro: string;
+  complemento: string;
+  cidade: string;
+  uf: string;
+  pagamento: 'Dinheiro' | 'Cartao' | 'Pix';
+}
 
 function formatBRL(value: number): string {
   return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value)
@@ -12,6 +33,11 @@ function formatBRL(value: number): string {
 
 function onlyDigits(v: string) {
   return (v || '').replace(/\D/g, '')
+}
+
+function dotFill(left: string, right: string, targetLen = 40) {
+  const dots = Math.max(4, targetLen - left.length - right.length)
+  return '.'.repeat(dots)
 }
 
 function buildItemsSummary(items: CartItem[]): string {
@@ -34,23 +60,30 @@ export default function CheckoutPage() {
   const [pickupOpen, setPickupOpen] = useState(false)
   const [deliveryOpen, setDeliveryOpen] = useState(false)
 
-  const [pickupForm, setPickupForm] = useState({
-    nome: '',
-    telefone: '',
-    pagamento: 'Pix' as 'Dinheiro' | 'Cartao' | 'Pix',
+  // React Hook Form for pickup
+  const { register: registerPickup, getValues: getPickupValues, watch: watchPickup, setValue: setPickupValue } = useForm<PickupFormValues>({
+    defaultValues: { nome: '', telefone: '', pagamento: 'Pix' },
   })
 
-  const [deliveryForm, setDeliveryForm] = useState({
-    nome: '',
-    telefone: '',
-    cep: '',
-    endereco: '',
-    numero: '',
-    bairro: '',
-    complemento: '',
-    cidade: '',
-    uf: '',
+  // React Hook Form for delivery
+  const { register: registerDelivery, getValues: getDeliveryValues, watch: watchDelivery, setValue: setDeliveryValue } = useForm<DeliveryFormValues>({
+    defaultValues: { nome: '', telefone: '', cep: '', endereco: '', numero: '', bairro: '', complemento: '', cidade: '', uf: '', pagamento: 'Pix' },
   })
+  const cepWatch = watchDelivery('cep')
+
+  const [lastCepFetched, setLastCepFetched] = useState<string>('')
+
+  const [brandingPhone, setBrandingPhone] = useState<string>('')
+
+  useEffect(() => {
+    fetch('/api/branding', { cache: 'no-store' })
+      .then(async (res) => {
+        if (!res.ok) return
+        const data = await res.json()
+        if (data && data.phone) setBrandingPhone(data.phone)
+      })
+      .catch(() => {})
+  }, [])
 
   async function lookupCEP(rawCep: string) {
     const cep = onlyDigits(rawCep)
@@ -59,69 +92,128 @@ export default function CheckoutPage() {
       const res = await fetch(`https://viacep.com.br/ws/${cep}/json/`)
       const data = await res.json()
       if (data && !data.erro) {
-        setDeliveryForm((f) => ({
-          ...f,
-          cep,
-          endereco: data.logradouro || f.endereco,
-          bairro: data.bairro || f.bairro,
-          cidade: data.localidade || f.cidade,
-          uf: data.uf || f.uf,
-        }))
+        const current = getDeliveryValues()
+        setDeliveryValue('cep', cep)
+        setDeliveryValue('endereco', data.logradouro || current.endereco)
+        setDeliveryValue('bairro', data.bairro || current.bairro)
+        setDeliveryValue('cidade', data.localidade || current.cidade)
+        setDeliveryValue('uf', (data.uf || current.uf || '').toUpperCase())
+        setLastCepFetched(cep)
       }
     } catch {
       // ignore
     }
   }
 
+  useEffect(() => {
+    const digits = onlyDigits(cepWatch || '')
+    if (digits.length === 8 && digits !== lastCepFetched) {
+      lookupCEP(digits)
+    }
+  }, [cepWatch, lastCepFetched])
+
   function openWhatsApp(message: string) {
-    const storePhone = onlyDigits(process.env.NEXT_PUBLIC_STORE_WHATSAPP || '')
+    const storePhone = onlyDigits(brandingPhone || '')
     const base = storePhone ? `https://wa.me/${storePhone}` : 'https://wa.me/'
     const url = `${base}?text=${encodeURIComponent(message)}`
     window.open(url, '_blank')
   }
 
   function handleSendPickup() {
-    const { nome, telefone, pagamento } = pickupForm
+    const { nome, telefone, pagamento } = getPickupValues()
     if (!nome || !telefone) {
       alert('Informe nome e telefone.')
       return
     }
+    const itemLines = items.flatMap(({ product, qty }) => {
+      const isPromo = !!product.promocaoAtiva && !!product.precoPromocional
+      const basePrice = isPromo ? (product.precoPromocional as number) : Number(product.preco || 0)
+      const unitPrice = getUnitPricePer100g(product, basePrice)
+      const lineTotal = computeLineTotal(product, basePrice, qty)
+      const displayQty = formatQtyGrams(product, qty)
+      const isWeight = isWeightProduct(product)
+      const nameLine = String(product.nome || '').toUpperCase()
+      const qtyLabel = isWeight ? `${displayQty}` : `${displayQty} un`
+      const left = `${qtyLabel} x ${formatBRL(unitPrice)}`
+      const right = `${formatBRL(lineTotal)}`
+      const dots = dotFill(left, right, 40)
+      return [
+        nameLine,
+        `${left} ${dots} ${right}`,
+        '',
+      ]
+    })
+
+    const pagamentoLabel = pagamento === 'Cartao' ? 'Cartão' : pagamento
+
     const msg = [
-      '*Novo pedido*',
+      '═══════════════════════════',
+      '     🔔 NOVO PEDIDO',
+      '═══════════════════════════',
       '',
-      '*Resumo:*',
-      buildItemsSummary(items),
-      `Subtotal: ${formatBRL(subtotal)}`,
+      `Cliente: ${nome}`,
+      `Fone: ${telefone}`,
       '',
-      '*Retirada na loja*',
-      `Nome: ${nome}`,
-      `Telefone: ${telefone}`,
-      `Pagamento: ${pagamento}`,
+      '───────────────────────────',
+      ...itemLines,
+      '───────────────────────────',
+      '',
+      `SUBTOTAL ................ ${formatBRL(subtotal)}`,
+      '',
+      `💵 Pagamento: ${pagamentoLabel}`,
+      '🏪 RETIRADA NA LOJA',
     ].join('\n')
     openWhatsApp(msg)
     clear()
   }
 
   function handleSendDelivery() {
-    const { nome, telefone, cep, endereco, numero, bairro, complemento, cidade, uf } = deliveryForm
+    const { nome, telefone, cep, endereco, numero, bairro, complemento, cidade, uf, pagamento } = getDeliveryValues()
     if (!nome || !telefone || !cep || !endereco || !numero || !bairro) {
       alert('Preencha os campos obrigatórios: nome, telefone, CEP, endereço, número e bairro.')
       return
     }
+
+    const itemLines = items.flatMap(({ product, qty }) => {
+      const isPromo = !!product.promocaoAtiva && !!product.precoPromocional
+      const basePrice = isPromo ? (product.precoPromocional as number) : Number(product.preco || 0)
+      const unitPrice = getUnitPricePer100g(product, basePrice)
+      const lineTotal = computeLineTotal(product, basePrice, qty)
+      const displayQty = formatQtyGrams(product, qty)
+      const isWeight = isWeightProduct(product)
+      const nameLine = String(product.nome || '').toUpperCase()
+      const qtyLabel = isWeight ? `${displayQty}` : `${displayQty} un`
+      const left = `${qtyLabel} x ${formatBRL(unitPrice)}`
+      const right = `${formatBRL(lineTotal)}`
+      const dots = dotFill(left, right, 40)
+      return [
+        nameLine,
+        `${left} ${dots} ${right}`,
+        '',
+      ]
+    })
+
+    const pagamentoLabel = pagamento === 'Cartao' ? 'Cartão' : pagamento
+
     const msg = [
-      '*Novo pedido*',
+      '═══════════════════════════',
+      '     🔔 NOVO PEDIDO',
+      '═══════════════════════════',
       '',
-      '*Resumo:*',
-      buildItemsSummary(items),
-      `Subtotal: ${formatBRL(subtotal)}`,
+      `Cliente: ${nome}`,
+      `Fone: ${telefone}`,
       '',
-      '*Entrega no endereço*',
-      `Nome: ${nome}`,
-      `Telefone: ${telefone}`,
+      '───────────────────────────',
+      ...itemLines,
+      '───────────────────────────',
+      '',
+      `SUBTOTAL ................ ${formatBRL(subtotal)}`,
+      '',
+      `💵 Pagamento: ${pagamentoLabel}`,
+      '🚚 ENTREGA NO ENDEREÇO',
       `CEP: ${cep}`,
       `Endereço: ${endereco}, Nº ${numero}`,
-      `Bairro: ${bairro}${complemento ? `, Compl.: ${complemento}` : ''}`,
-      `${cidade ? `Cidade: ${cidade}` : ''}${uf ? ` - ${uf}` : ''}`,
+      `Bairro: ${bairro}${complemento ? `, Complemento: ${complemento}` : ''}`,
     ].join('\n')
     openWhatsApp(msg)
     clear()
@@ -142,7 +234,7 @@ export default function CheckoutPage() {
   }
 
   return (
-    <>
+    <React.Fragment>
       <div className="max-w-5xl mx-auto lg:grid lg:grid-cols-3 lg:gap-8">
         {/* Resumo do Pedido acima (coluna lateral com margem inferior) */}
         <div className="lg:col-span-1 order-first lg:order-none mb-8 lg:mb-0">
@@ -200,106 +292,126 @@ export default function CheckoutPage() {
               </button>
               <button onClick={() => setDeliveryOpen(true)} className="h-24 border rounded-md p-4 text-left hover:bg-gray-50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-gray-300">
                 <div className="font-medium">Entregar no endereço</div>
-                <div className="text-xs text-tertiary">Informe seu endereço e contato</div>
+                <div className="text-xs text-tertiary">Informe seu endereço completo</div>
               </button>
             </div>
           </div>
-        </div>
-      </div>
 
-        {/* Modais dentro do fragmento */}
-        {pickupOpen && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center">
-            <div className="absolute inset-0 bg-black/40" onClick={() => setPickupOpen(false)} />
-            <div className="relative bg-white rounded-lg shadow-xl w-full max-w-md p-5">
-              <div className="flex justify-between items-center mb-3">
-                <h3 className="text-lg font-semibold">Retirar na loja</h3>
-                <button onClick={() => setPickupOpen(false)} className="text-gray-500 hover:text-gray-700 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-gray-300">✕</button>
-              </div>
-              <div className="space-y-3">
-                <div>
-                  <label className="block text-sm mb-1">Nome completo</label>
-                  <input value={pickupForm.nome} onChange={(e) => setPickupForm({ ...pickupForm, nome: e.target.value })} className="w-full border rounded-md h-10 px-3 text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-gray-300" />
+          {/* Modal Retirar na loja */}
+          <AnimatePresence>
+          {pickupOpen && (
+            <m.div className="fixed inset-0 z-50 flex items-center justify-center" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+              <m.div className="absolute inset-0 bg-black/40" onClick={() => setPickupOpen(false)} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} />
+              <m.div className="relative bg-white rounded-lg shadow-xl w-full max-w-md p-5" initial={{ y: 40, scale: 0.98, opacity: 0 }} animate={{ y: 0, scale: 1, opacity: 1 }} exit={{ y: 20, scale: 0.98, opacity: 0 }} transition={{ type: 'spring', stiffness: 260, damping: 20 }}>
+                {/* conteúdo original do modal */}
+                <div className="flex justify-between items-center mb-3">
+                  <h3 className="text-lg font-semibold">Retirar na loja</h3>
+                  <button onClick={() => setPickupOpen(false)} className="text-gray-500 hover:text-gray-700 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-gray-300">✕</button>
                 </div>
-                <div>
-                  <label className="block text-sm mb-1">Telefone (WhatsApp)</label>
-                  <input value={pickupForm.telefone} onChange={(e) => setPickupForm({ ...pickupForm, telefone: e.target.value })} className="w-full border rounded-md h-10 px-3 text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-gray-300" placeholder="(11) 99999-9999" />
-                </div>
-                <div>
-                  <label className="block text-sm mb-1">Forma de pagamento</label>
-                  <div className="grid grid-cols-3 gap-2">
-                    {(['Dinheiro','Cartao','Pix'] as const).map((p) => (
-                      <button key={p} type="button" onClick={() => setPickupForm({ ...pickupForm, pagamento: p })} className={`h-10 border rounded-md text-sm ${pickupForm.pagamento === p ? 'bg-green-50 border-green-400' : ''} focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-gray-300`}>{p}</button>
-                    ))}
-                  </div>
-                </div>
-                <div className="pt-2">
-                  <button onClick={handleSendPickup} className="w-full h-10 rounded-md bg-secondary text-white text-sm font-medium hover:opacity-90 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-gray-300">Enviar pedido via WhatsApp</button>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {deliveryOpen && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center">
-            <div className="absolute inset-0 bg-black/40" onClick={() => setDeliveryOpen(false)} />
-            <div className="relative bg-white rounded-lg shadow-xl w-full max-w-md p-5">
-              <div className="flex justify-between items-center mb-3">
-                <h3 className="text-lg font-semibold">Entregar no endereço</h3>
-                <button onClick={() => setDeliveryOpen(false)} className="text-gray-500 hover:text-gray-700 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-gray-300">✕</button>
-              </div>
-              <div className="space-y-3">
-                <div>
-                  <label className="block text-sm mb-1">Nome completo</label>
-                  <input value={deliveryForm.nome} onChange={(e) => setDeliveryForm({ ...deliveryForm, nome: e.target.value })} className="w-full border rounded-md h-10 px-3 text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-gray-300" />
-                </div>
-                <div>
-                  <label className="block text-sm mb-1">Telefone (WhatsApp)</label>
-                  <input value={deliveryForm.telefone} onChange={(e) => setDeliveryForm({ ...deliveryForm, telefone: e.target.value })} className="w-full border rounded-md h-10 px-3 text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-gray-300" placeholder="(11) 99999-9999" />
-                </div>
-                <div>
-                  <label className="block text-sm mb-1">CEP</label>
-                  <input value={deliveryForm.cep} onChange={(e) => setDeliveryForm({ ...deliveryForm, cep: e.target.value })} onBlur={(e) => lookupCEP(e.target.value)} className="w-full border rounded-md h-10 px-3 text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-gray-300" placeholder="00000-000" />
-                </div>
-                <div>
-                  <label className="block text-sm mb-1">Endereço</label>
-                  <input value={deliveryForm.endereco} onChange={(e) => setDeliveryForm({ ...deliveryForm, endereco: e.target.value })} className="w-full border rounded-md h-10 px-3 text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-gray-300" />
-                </div>
-                <div className="grid grid-cols-2 gap-2">
+                <div className="space-y-3">
                   <div>
-                    <label className="block text-sm mb-1">Número</label>
-                    <input value={deliveryForm.numero} onChange={(e) => setDeliveryForm({ ...deliveryForm, numero: e.target.value })} className="w-full border rounded-md h-10 px-3 text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-gray-300" />
+                    <label className="block text-sm mb-1">Nome completo</label>
+                    <input {...registerPickup('nome', { required: true })} className="w-full border rounded-md h-10 px-3 text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-gray-300" />
                   </div>
                   <div>
-                    <label className="block text-sm mb-1">Bairro</label>
-                    <input value={deliveryForm.bairro} onChange={(e) => setDeliveryForm({ ...deliveryForm, bairro: e.target.value })} className="w-full border rounded-md h-10 px-3 text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-gray-300" />
-                  </div>
-                </div>
-                <div className="grid grid-cols-2 gap-2">
-                  <div>
-                    <label className="block text-sm mb-1">Complemento</label>
-                    <input value={deliveryForm.complemento} onChange={(e) => setDeliveryForm({ ...deliveryForm, complemento: e.target.value })} className="w-full border rounded-md h-10 px-3 text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-gray-300" />
+                    <label className="block text-sm mb-1">Telefone (WhatsApp)</label>
+                    <input {...registerPickup('telefone', { required: true })} className="w-full border rounded-md h-10 px-3 text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-gray-300" placeholder="(11) 99999-9999" />
                   </div>
                   <div>
-                    <label className="block text-sm mb-1">Cidade / UF</label>
-                    <div className="grid grid-cols-2 gap-2">
-                      <input value={deliveryForm.cidade} onChange={(e) => setDeliveryForm({ ...deliveryForm, cidade: e.target.value })} className="w-full border rounded-md h-10 px-3 text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-gray-300" placeholder="Cidade" />
-                      <input value={deliveryForm.uf} onChange={(e) => setDeliveryForm({ ...deliveryForm, uf: e.target.value })} className="w-full border rounded-md h-10 px-3 text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-gray-300" placeholder="UF" />
+                    <label className="block text-sm mb-1">Forma de pagamento</label>
+                    <div className="grid grid-cols-3 gap-2">
+                      {(['Dinheiro','Cartao','Pix'] as const).map((p) => (
+                        <button key={p} type="button" onClick={() => setPickupValue('pagamento', p)} className={`h-10 border rounded-md text-sm ${watchPickup('pagamento') === p ? 'bg-white border-primary' : ''} focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-gray-300`}>{p}</button>
+                      ))}
                     </div>
                   </div>
+                  <div className="pt-2">
+                    <button onClick={handleSendPickup} className="w-full h-10 rounded-md bg-secondary text-white text-sm font-medium hover:opacity-90 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-gray-300">Enviar pedido via WhatsApp</button>
+                  </div>
                 </div>
-                <div className="pt-2">
-                  <button onClick={handleSendDelivery} className="w-full h-10 rounded-md bg-secondary text-white text-sm font-medium hover:opacity-90 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-gray-300">Enviar pedido via WhatsApp</button>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
+              </m.div>
+            </m.div>
+          )}
+          </AnimatePresence>
 
- <div className="mt-4">
-          <Link href="/cart" className="text-sm text-secondary hover:opacity-80 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-gray-300">Voltar ao carrinho</Link>
+          {/* Modal Entregar no endereço */}
+          <AnimatePresence>
+          {deliveryOpen && (
+            <m.div className="fixed inset-0 z-50 flex items-center justify-center" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+              <m.div className="absolute inset-0 bg-black/40" onClick={() => setDeliveryOpen(false)} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} />
+              <m.div className="relative bg-white rounded-lg shadow-xl w-full max-w-md p-5" initial={{ y: 40, scale: 0.98, opacity: 0 }} animate={{ y: 0, scale: 1, opacity: 1 }} exit={{ y: 20, scale: 0.98, opacity: 0 }} transition={{ type: 'spring', stiffness: 260, damping: 20 }}>
+                {/* conteúdo original do modal */}
+                <div className="flex justify-between items-center mb-3">
+                  <h3 className="text-lg font-semibold">Entregar no endereço</h3>
+                  <button onClick={() => setDeliveryOpen(false)} className="text-gray-500 hover:text-gray-700 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-gray-300">✕</button>
+                </div>
+                <div className="space-y-3">
+                  <div>
+                    <label className="block text-sm mb-1">Nome completo</label>
+                    <input {...registerDelivery('nome', { required: true })} className="w-full border rounded-md h-10 px-3 text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-gray-300" />
+                  </div>
+                  <div>
+                    <label className="block text-sm mb-1">Telefone (WhatsApp)</label>
+                    <input {...registerDelivery('telefone', { required: true })} className="w-full border rounded-md h-10 px-3 text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-gray-300" placeholder="(11) 99999-9999" />
+                  </div>
+                  <div>
+                    <label className="block text-sm mb-1">CEP</label>
+                    <input {...registerDelivery('cep', { required: true })} onChange={(e) => { const v = e.target.value; setDeliveryValue('cep', v, { shouldValidate: true }); const digits = onlyDigits(v); if (digits.length === 8 && digits !== lastCepFetched) { lookupCEP(v) } }} onBlur={(e) => lookupCEP(e.target.value)} className="w-full border rounded-md h-10 px-3 text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-gray-300" placeholder="00000-000" />
+                  </div>
+                  <div className="grid grid-cols-5 gap-2">
+                    <div className="col-span-4">
+                      <label className="block text sm mb-1">Endereço</label>
+                      <input {...registerDelivery('endereco', { required: true })} className="w-full border rounded-md h-10 px-3 text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-gray-300" />
+                    </div>
+                    <div className="col-span-1">
+                      <label className="block text-sm mb-1">Número</label>
+                      <input {...registerDelivery('numero', { required: true, pattern: /^\d{1,4}$/ })} onChange={(e) => { const digits = onlyDigits(e.target.value).slice(0, 4); setDeliveryValue('numero', digits, { shouldValidate: true }); }} maxLength={4} inputMode="numeric" pattern="\\d*" placeholder="0000" className="w-full border rounded-md h-10 px-3 text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-gray-300" />
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="block text-sm mb-1">Bairro</label>
+                      <input {...registerDelivery('bairro', { required: true })} className="w-full border rounded-md h-10 px-3 text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-gray-300" />
+                    </div>
+                    <div>
+                      <label className="block text-sm mb-1">Complemento</label>
+                      <input {...registerDelivery('complemento')} className="w-full border rounded-md h-10 px-3 text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-gray-300" />
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="block text-sm mb-1">Cidade</label>
+                      <input {...registerDelivery('cidade', { required: true })} className="w-full border rounded-md h-10 px-3 text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-gray-300" />
+                    </div>
+                    <div>
+                      <label className="block text-sm mb-1">UF</label>
+                      <input {...registerDelivery('uf', { required: true, pattern: /^[A-Za-z]{2}$/ })} onChange={(e) => setDeliveryValue('uf', e.target.value.toUpperCase(), { shouldValidate: true })} className="w-full border rounded-md h-10 px-3 text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-gray-300" />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-sm mb-1">Forma de pagamento</label>
+                    <div className="grid grid-cols-3 gap-2">
+                      {(['Dinheiro','Cartao','Pix'] as const).map((p) => (
+                        <button key={p} type="button" onClick={() => setDeliveryValue('pagamento', p)} className={`h-10 border rounded-md text-sm ${watchDelivery('pagamento') === p ? 'bg-white border-primary' : ''} focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-gray-300`}>{p}</button>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="pt-2">
+                    <button onClick={handleSendDelivery} className="w-full h-10 rounded-md bg-secondary text-white text-sm font-medium hover:opacity-90 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-gray-300">Enviar pedido via WhatsApp</button>
+                  </div>
+                </div>
+              </m.div>
+            </m.div>
+          )}
+          </AnimatePresence>
+
+          {/* restante do componente */}
+
+          <div className="mt-4">
+            <Link href="/cart" className="text-sm text-secondary hover:opacity-80 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-gray-300">Voltar ao carrinho</Link>
+          </div>
         </div>
-    </>
+      </div>
+    </React.Fragment>
   )
 }

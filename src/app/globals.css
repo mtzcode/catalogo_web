@@ -2,14 +2,22 @@
 
 /* Tailwind v4 design tokens */
 :root {
-  --color-primary: #64ba01;
-  --color-secondary: #3a3a3a;
+  /* Fonte e assets */
+  --font-family-sans: var(--font-poppins), system-ui, sans-serif;
+  --logo-url: url("/window.svg");
+
+  /* Paleta centralizada: sempre lê das variáveis de brand com fallback único */
+  --color-primary: var(--brand-color-primary, #8a1065);
+  --color-secondary: var(--brand-color-secondary, #333333);
   --color-tertiary: #8f8f8f;
   --color-quaternary: #b9b9b9;
   --color-background: #ffffff;
   --color-foreground: #171717;
-  --font-family-sans: var(--font-poppins), system-ui, sans-serif;
 }
+
+/* Permitir trocar tema por data-theme no html */
+/* Removido override por data-theme para evitar duplicidade.
+   O :root acima já centraliza a leitura das cores. */
 
 body {
   background: var(--color-background);
@@ -52,7 +60,9 @@ main {
 }
 .category-button.active {
   transform: scale(1.05);
-  box-shadow: 0 4px 12px rgba(100, 186, 1, 0.25);
+  /* Tinta de sombra baseada na cor primária (fallback suave se o browser não suportar color-mix) */
+  box-shadow: 0 4px 12px
+    color-mix(in srgb, var(--color-primary) 25%, transparent);
 }
 
 @keyframes shimmer {

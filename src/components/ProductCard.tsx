@@ -11,14 +11,18 @@ function formatBRL(value: number): string {
 }
 
 export function ProductCard({ p }: { p: Produto }) {
-  const hasImage = !!p.imagemUrl || !!p.codigoBarras;
-  const imageSrc = p.imagemUrl ?? (p.codigoBarras ? cloudinaryUrl(p.codigoBarras, { withExt: true, transformations: ["f_auto", "q_auto:good", "c_limit", "w_400"] }) : "");
+  const cleanImageUrl = typeof p.imagemUrl === "string" && p.imagemUrl.trim().length > 0 ? p.imagemUrl : null;
+  const imageSrc = cleanImageUrl ?? (p.codigoBarras ? cloudinaryUrl(p.codigoBarras, { withExt: true, transformations: ["f_auto", "q_auto:good", "c_limit", "w_400"] }) : undefined);
+  const hasImage = Boolean(imageSrc);
   const isPromo = !!p.promocaoAtiva && !!p.precoPromocional;
   const basePrice = Number(p.preco || 0);
   const finalPrice = isPromo ? (p.precoPromocional as number) : basePrice;
   const finalPricePer100g = getUnitPricePer100g(p, finalPrice);
   const originalPricePer100g = getUnitPricePer100g(p, basePrice);
-  const priceClass = isPromo ? "text-red-700" : "text-green-700";
+  const priceClass = isPromo ? "text-red-700" : "text-primary";
+  const discountPct = isPromo && basePrice > 0
+    ? Math.max(0, Math.round(((basePrice - finalPrice) / basePrice) * 100))
+    : null;
   // Produto de peso: considera unit_type === 'weight' ou campo pesavel preenchido
   const isWeight = isWeightProduct(p);
   const { add } = useCart();
@@ -27,7 +31,9 @@ export function ProductCard({ p }: { p: Produto }) {
   return (
     <div className="rounded-lg border bg-white hover:shadow-md transition-all duration-300 btn-hover relative flex flex-col h-full">
       {isPromo && (
-        <div className="absolute top-2 left-2 z-20 bg-red-500 text-white text-xs font-bold px-2 py-1 rounded-md shadow-lg">OFERTA</div>
+        <div className="absolute top-2 left-2 z-20 bg-red-500 text-white text-xs font-bold px-2 py-1 rounded-md shadow-lg">
+          {discountPct ? `-${discountPct}%` : 'OFERTA'}
+        </div>
       )}
 
       {/* Imagem / Placeholder */}
@@ -44,7 +50,7 @@ export function ProductCard({ p }: { p: Produto }) {
               <span className="text-xs">Sem imagem</span>
             </div>
           ) : (
-            <Image src={imageSrc} alt={p.nome} className="w-full h-full object-contain rounded-md" width={512} height={512} unoptimized onError={() => setImgError(true)} />
+            <Image src={imageSrc} alt={p.nome} className="w-full h-full object-contain rounded-md" width={400} height={400} unoptimized onError={() => setImgError(true)} />
           )
         ) : (
           <div className="flex flex-col items-center justify-center text-tertiary select-none h-full">
@@ -82,7 +88,7 @@ export function ProductCard({ p }: { p: Produto }) {
                   <path d="M19 10l-7-7H5a2 2 0 00-2 2v7l7 7 9-9z" />
                   <circle cx="7.5" cy="7.5" r="1.5" />
                 </svg>
-                {formatBRL(isWeight ? originalPricePer100g : basePrice)}
+                {formatBRL(isWeight ? originalPricePer100g : basePrice)}{isWeight ? ' /100g' : ''}
                 </span>
               )}
             <span className={`flex items-center gap-1 text-sm sm:text-xs font-semibold ${priceClass}`}>
